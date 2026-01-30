@@ -1,26 +1,30 @@
-# Slim yerine TAM surumu kullaniyoruz (Daha kararli)
-FROM python:3.9
+# 1. En kararlı ve hafif Python sürümünü kullan (Debian Bullseye)
+FROM python:3.9-slim-bullseye
 
-# Etkilesimsiz mod (Hata riskini azaltir)
+# 2. Kurulum sırasında soru sormasın (Otomatik Evet de)
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Adim 1: Depolari guncelle (Hata verirse durmasin diye ayri yazdik)
-RUN apt-get update
+# 3. Güncelleme ve Yüklemeyi TEK SEFERDE yap (Bağlantı kopmasını önler)
+# --fix-missing: İndiremediği paket olursa düzeltip devam etsin
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
+    texlive-latex-base \
+    texlive-latex-extra \
+    texlive-lang-turkish \
+    texlive-fonts-recommended \
+    && rm -rf /var/lib/apt/lists/*
 
-# Adim 2: LaTeX paketlerini yukle
-# --no-install-recommends komutunu kaldirdik, tam kurulum yapsin.
-RUN apt-get install -y texlive-latex-base texlive-latex-extra texlive-lang-turkish
-
-# Gereksiz dosyalari temizle
-RUN rm -rf /var/lib/apt/lists/*
-
+# 4. Çalışma klasörünü ayarla
 WORKDIR /app
 
+# 5. Gereksinimleri yükle
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 6. Tüm dosyaları kopyala
 COPY . .
 
+# 7. Klasör izinlerini ayarla
 RUN mkdir -p uploads outputs && chmod 777 uploads outputs
 
+# 8. Uygulamayı başlat
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]

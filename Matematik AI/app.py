@@ -2,131 +2,165 @@ from flask import Flask, request, jsonify, send_from_directory
 import google.generativeai as genai
 import os
 import uuid
-import subprocess
 import json
 
 app = Flask(__name__)
 
 # --- AYARLAR ---
-# API Key'i sunucu ortam değişkenlerinden almak en güvenlisidir.
-# Render'da "Environment Variables" kısmına GOOGLE_API_KEY olarak ekleyeceksin.
-API_KEY = os.environ.get("GOOGLE_API_KEY", "BURAYA_API_KEY_YAZABILIRSIN_AMA_ONERILMEZ")
+# Render'daki Environment Variable'dan anahtarı al
+API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=API_KEY)
-
 MODEL_NAME = "gemini-1.5-flash"
+
+# Klasör Ayarları
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
-BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:5000") # Sunucu adresi
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# --- LATEX ŞABLONU ---
-LATEX_TEMPLATE = r"""
-\documentclass[12pt,a4paper,twoside]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage[turkish,shorthands=off]{babel}
-\usepackage{lmodern}
-\usepackage{amsmath,amsfonts,amssymb}
-\usepackage{graphicx}
-\usepackage{xcolor}
-\usepackage{microtype}
-\usepackage[a4paper, top=2cm, bottom=2.5cm, inner=2.5cm, outer=1.5cm]{geometry}
-\usepackage{tcolorbox}
-\tcbuselibrary{skins}
-\usepackage{tabularx}
-\newcolumntype{Y}{>{\centering\arraybackslash}X}
-\definecolor{HeaderTeal}{RGB}{0,105,105}
-\newcommand{\KonuKutusu}[2]{\begin{tcolorbox}[colframe=HeaderTeal, colback=HeaderTeal, sharp corners]\centering\bfseries\color{white}\large #1 \\ \small #2\end{tcolorbox}}
-\newcommand{\Siklar}[5]{\vspace{2mm}\begin{tabularx}{\linewidth}{@{}Y Y Y Y Y@{}} \textbf{A)} #1 & \textbf{B)} #2 & \textbf{C)} #3 & \textbf{D)} #4 & \textbf{E)} #5 \end{tabularx}}
+# Sunucu Adresi (Render otomatik verir veya biz elle yazarız)
+BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://127.0.0.1:5000")
 
-\begin{document}
-\KonuKutusu{VAR_KONU}{VAR_KAZANIM}
-\vspace{5mm}
+# --- HTML ŞABLONU (A4 Kağıdı Görünümü) ---
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matematik Çalışma Kağıdı</title>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #e0e0e0; /* Arka plan gri */
+            margin: 0; padding: 20px;
+        }
+        .page {
+            background: white;
+            width: 210mm; /* A4 Genişliği */
+            min-height: 297mm; /* A4 Yüksekliği */
+            margin: 0 auto;
+            padding: 20mm;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+        }
+        .header { 
+            text-align: center; border-bottom: 2px solid #006969; 
+            padding-bottom: 10px; margin-bottom: 20px; 
+        }
+        .header h1 { color: #006969; margin: 0; font-size: 24px; }
+        .header p { color: #666; margin: 5px 0 0 0; }
+        
+        .question-box {
+            border: 1px solid #ddd; border-radius: 8px; 
+            padding: 15px; margin-bottom: 15px; page-break-inside: avoid;
+        }
+        .level-badge {
+            display: inline-block; padding: 3px 8px; border-radius: 4px; 
+            color: white; font-size: 12px; font-weight: bold; margin-bottom: 5px;
+        }
+        .temel { background-color: #2e7d32; }
+        .orta { background-color: #ef6c00; }
+        .yeni { background-color: #c62828; }
 
-% --- SORULAR BURAYA ---
-\begin{tcolorbox}[title={Soru 1}, colframe=green!60!black] VAR_S1_SORU \Siklar{VAR_S1_A}{VAR_S1_B}{VAR_S1_C}{VAR_S1_D}{VAR_S1_E} \end{tcolorbox} \vspace{2mm}
-\begin{tcolorbox}[title={Soru 2}, colframe=green!60!black] VAR_S2_SORU \Siklar{VAR_S2_A}{VAR_S2_B}{VAR_S2_C}{VAR_S2_D}{VAR_S2_E} \end{tcolorbox} \vspace{2mm}
-\begin{tcolorbox}[title={Soru 3}, colframe=green!60!black] VAR_S3_SORU \Siklar{VAR_S3_A}{VAR_S3_B}{VAR_S3_C}{VAR_S3_D}{VAR_S3_E} \end{tcolorbox} \vspace{2mm}
-\begin{tcolorbox}[title={Soru 4}, colframe=green!60!black] VAR_S4_SORU \Siklar{VAR_S4_A}{VAR_S4_B}{VAR_S4_C}{VAR_S4_D}{VAR_S4_E} \end{tcolorbox} \vspace{2mm}
-\begin{tcolorbox}[title={Soru 5}, colframe=orange!75!black] VAR_S5_SORU \Siklar{VAR_S5_A}{VAR_S5_B}{VAR_S5_C}{VAR_S5_D}{VAR_S5_E} \end{tcolorbox} \vspace{2mm}
-\begin{tcolorbox}[title={Soru 6}, colframe=orange!75!black] VAR_S6_SORU \Siklar{VAR_S6_A}{VAR_S6_B}{VAR_S6_C}{VAR_S6_D}{VAR_S6_E} \end{tcolorbox} \vspace{2mm}
-\begin{tcolorbox}[title={Soru 7: Yeni Nesil}, colframe=purple!70!black] VAR_S7_SORU \Siklar{VAR_S7_A}{VAR_S7_B}{VAR_S7_C}{VAR_S7_D}{VAR_S7_E} \end{tcolorbox}
+        .options { 
+            display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; 
+            margin-top: 15px; padding-top: 10px; border-top: 1px dashed #eee;
+        }
+        .opt { font-weight: bold; font-size: 14px; }
 
-\end{document}
+        @media print {
+            body { background: white; margin: 0; padding: 0; }
+            .page { box-shadow: none; margin: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <h1>VAR_KONU</h1>
+            <p>Kazanım: VAR_KAZANIM</p>
+        </div>
+        VAR_SORULAR
+    </div>
+</body>
+</html>
 """
 
-@app.route('/generate-pdf', methods=['POST'])
-def generate_pdf():
-    # 1. Dosya Kontrolü
+@app.route('/generate-html', methods=['POST'])
+def generate_html():
     if 'image' not in request.files:
         return jsonify({"error": "Resim yüklenmedi"}), 400
     
     file = request.files['image']
-    unique_id = str(uuid.uuid4())[:8] # Dosyalar karışmasın diye rastgele ID
-    filename = f"{unique_id}.jpg"
-    image_path = os.path.join(UPLOAD_FOLDER, filename)
+    unique_id = str(uuid.uuid4())[:8]
+    image_path = os.path.join(UPLOAD_FOLDER, f"{unique_id}.jpg")
     file.save(image_path)
 
     try:
-        # 2. Gemini'ye Gönder
+        # 1. Gemini'ye Gönder
         myfile = genai.upload_file(image_path)
         model = genai.GenerativeModel(MODEL_NAME)
         
         prompt = """
-        Bu matematik sorusunu analiz et. Konuyu ve kazanımı belirle. Ardından 7 adet benzer soru üret.
+        Bu matematik sorusunu analiz et. Konuyu ve kazanımı belirle.
+        Ardından bu konudan 7 adet özgün soru üret (4 temel, 2 orta, 1 yeni nesil).
         Matematik ifadelerini LaTeX formatında ($...$) yaz.
-        SADECE JSON formatında yanıt ver:
+        SADECE şu JSON formatında yanıt ver:
         {
           "konu": "...", "kazanim": "...",
           "sorular": [
-            {"metin": "Soru...", "A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
-            ... (toplam 7 tane)
+            {"seviye": "Temel", "metin": "...", "A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
+            {"seviye": "Orta", "metin": "...", "A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
+            {"seviye": "Yeni Nesil", "metin": "...", "A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}
           ]
         }
         """
         
-        result = model.generate_content(
-            [myfile, prompt],
-            generation_config={"response_mime_type": "application/json"}
-        )
+        result = model.generate_content([myfile, prompt], generation_config={"response_mime_type": "application/json"})
         data = json.loads(result.text)
 
-        # 3. LaTeX Dosyasını Hazırla
-        tex_content = LATEX_TEMPLATE
-        tex_content = tex_content.replace("VAR_KONU", data.get("konu", "Matematik"))
-        tex_content = tex_content.replace("VAR_KAZANIM", data.get("kazanim", "Genel"))
+        # 2. HTML İçeriğini Doldur
+        sorular_html = ""
+        for i, s in enumerate(data.get("sorular", [])):
+            renk = "temel"
+            if "Orta" in s['seviye']: renk = "orta"
+            if "Yeni" in s['seviye']: renk = "yeni"
 
-        sorular = data.get("sorular", [])
-        for i, s in enumerate(sorular):
-            idx = i + 1
-            tex_content = tex_content.replace(f"VAR_S{idx}_SORU", s.get("metin", ""))
-            tex_content = tex_content.replace(f"VAR_S{idx}_A", s.get("A", "")).replace(f"VAR_S{idx}_B", s.get("B", "")).replace(f"VAR_S{idx}_C", s.get("C", "")).replace(f"VAR_S{idx}_D", s.get("D", "")).replace(f"VAR_S{idx}_E", s.get("E", ""))
+            sorular_html += f"""
+            <div class="question-box">
+                <span class="level-badge {renk}">Soru {i+1}: {s['seviye']}</span>
+                <div>{s['metin']}</div>
+                <div class="options">
+                    <div class="opt">A) {s['A']}</div>
+                    <div class="opt">B) {s['B']}</div>
+                    <div class="opt">C) {s['C']}</div>
+                    <div class="opt">D) {s['D']}</div>
+                    <div class="opt">E) {s['E']}</div>
+                </div>
+            </div>
+            """
 
-        tex_filename = f"{unique_id}.tex"
-        tex_path = os.path.join(OUTPUT_FOLDER, tex_filename)
-        
-        with open(tex_path, "w", encoding="utf-8") as f:
-            f.write(tex_content)
+        final_html = HTML_TEMPLATE.replace("VAR_KONU", data.get("konu", "Matematik"))
+        final_html = final_html.replace("VAR_KAZANIM", data.get("kazanim", "Genel"))
+        final_html = final_html.replace("VAR_SORULAR", sorular_html)
 
-        # 4. PDF Derle (pdflatex komutu)
-        subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "-output-directory", OUTPUT_FOLDER, tex_path],
-            check=True, stdout=subprocess.DEVNULL
-        )
+        filename = f"{unique_id}.html"
+        save_path = os.path.join(OUTPUT_FOLDER, filename)
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(final_html)
 
-        # 5. Sonuç URL'sini Döndür
-        pdf_filename = f"{unique_id}.pdf"
-        pdf_url = f"{BASE_URL}/download/{pdf_filename}"
-        
-        return jsonify({"success": True, "pdf_url": pdf_url})
+        # 3. Linki Döndür
+        file_url = f"{BASE_URL}/view/{filename}"
+        return jsonify({"success": True, "url": file_url})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/download/<filename>')
-def download_file(filename):
+@app.route('/view/<filename>')
+def view_file(filename):
     return send_from_directory(OUTPUT_FOLDER, filename)
 
 if __name__ == '__main__':

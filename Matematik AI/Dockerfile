@@ -1,8 +1,14 @@
 FROM python:3.9-slim
 
-# Sadece en temel LaTeX paketlerini yükle (Daha az yer kaplar)
-RUN apt-get update && apt-get install -y \
+# Etkilesimsiz kurulum modu (Hatalari onler)
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Gerekli LaTeX paketlerini yukle
+# --no-install-recommends: Gereksiz dosyalari yuklemez (Daha hafif olur)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     texlive-latex-base \
+    texlive-latex-extra \
     texlive-lang-turkish \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,8 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Klasörleri oluştur
+# Klasorleri olustur ve izin ver
 RUN mkdir -p uploads outputs && chmod 777 uploads outputs
 
-# Uygulamayı başlat
+# Uygulamayi baslat (Zaman asimini 120 saniye yaptik)
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]
